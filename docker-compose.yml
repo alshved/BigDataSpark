@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_USER: spark
+      POSTGRES_PASSWORD: sparkpass
+      POSTGRES_DB: mockdb
+    volumes:
+      - ./sql/init:/docker-entrypoint-initdb.d:ro
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spark -d mockdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bigdata_net
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:  
+      CLICKHOUSE_USER: spark
+      CLICKHOUSE_PASSWORD: sparkpass
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--user", "spark", "--password", "sparkpass", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - bigdata_net
+
+  spark-etl:
+    build:
+      context: .
+      dockerfile: Dockerfile.spark     
+    container_name: spark
+    ports:
+      - "4040:4040"
+    volumes:
+      - ./spark:/opt/spark/work-dir   
+    environment:
+      - SPARK_MODE=local
+      - SPARK_LOCAL_IP=spark
+    networks:
+      - bigdata_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/opt/spark/work-dir/run_etl.sh"]
+
+networks:
+  bigdata_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  clickhouse_data:
