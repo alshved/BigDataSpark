@@ -1,49 +1,27 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-find_spark_submit() {
-  candidates=("/spark/bin/spark-submit" "/opt/spark/bin/spark-submit" "/usr/bin/spark-submit")
-  for p in "${candidates[@]}"; do
-    if [ -x "$p" ]; then
-      echo "$p"
-      return 0
-    fi
-  done
-  if command -v spark-submit >/dev/null 2>&1; then
-    command -v spark-submit
-    return 0
-  fi
-  return 1
-}
+PG_JAR="/opt/spark/jars/postgresql-42.7.10.jar"
+CH_JAR="/opt/spark/jars/clickhouse-jdbc-all-0.9.8.jar"
+SPARK_BIN="/opt/spark/bin/spark-submit"
 
-SPARK_SUBMIT="$(find_spark_submit || true)"
-if [ -z "$SPARK_SUBMIT" ]; then
-  echo "ОШИБКА: spark-submit не найден. Проверьте установку Spark." >&2
-  exit 2
-fi
+submit_job() {
+    local job_desc=$1
+    local job_file=$2
+    local jars=$3
 
-PACKAGES="org.postgresql:postgresql:42.6.0,com.clickhouse:clickhouse-jdbc:0.4.6"
-
-run_job1() {
-    echo -e "\nЗапуск: Job1 данные -> звезда (PostgreSQL)"
-    "$SPARK_SUBMIT" \
-        --packages "$PACKAGES" \
+    echo "Запуск: $job_desc"
+    
+    $SPARK_BIN \
         --master local[*] \
+        --jars "$jars" \
         --conf spark.sql.legacy.timeParserPolicy=LEGACY \
         --conf spark.driver.memory=2g \
-        /opt/spark/work-dir/etl_to_postgres.py
+        --conf spark.log.level=WARN \
+        "/opt/spark/work-dir/$job_file"
 }
 
-run_job2() {
-    echo -e "\nЗапуск: Job2 звезда -> ClickHouse"
-    "$SPARK_SUBMIT" \
-        --packages "$PACKAGES" \
-        --master local[*] \
-        --conf spark.driver.memory=2g \
-        /opt/spark/work-dir/job2_star_to_clickhouse.py
-}
+submit_job "Job1 (Raw -> Star Schema)" "job1_raw_to_star.py" "$PG_JAR"
+submit_job "Job2 (Star Schema -> ClickHouse)" "job2_star_to_clickhouse.py" "$PG_JAR,$CH_JAR"
 
-run_job1
-run_job2
-
-echo -e "\nDone!"
+echo "Все задачи успешно завершены!"
